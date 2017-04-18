@@ -6,12 +6,12 @@ import cereal.parse.CSVParser;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.URL;
 import java.nio.file.Files;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,11 +24,10 @@ public class CSVReader<T> {
 
     /**
      * Constructor
-     * Classname must be sent as a parameter in the form <tt>ClassName.class</tt>
+     * Class name must be sent as a parameter in the form <tt>ClassName.class</tt>
      * @param parentClass name of class containing CSVField/CSVHeader annotations
      */
     public CSVReader(Class<?> parentClass) {
-        //this.csvClass = csvClass;
         csvClass = new CSVClass(parentClass);
         logger.log(Level.INFO, "Reader created successfully...");
     }
@@ -119,6 +118,12 @@ public class CSVReader<T> {
         }
     }
 
+    /**
+     * Returns a List of T objects populated by the CSV file supplied
+     * Object T must be the same as instanced with CSVReader
+     * @param filename file/path reference
+     * @return List of T objects or null
+     */
     public List<T> read(String filename) {
         List<T> results = null;
         try (BufferedReader br = Files.newBufferedReader(new File(filename).toPath())) {
@@ -128,6 +133,162 @@ public class CSVReader<T> {
             logger.log(Level.SEVERE, ioe.getMessage());
         }
         return results;
+    }
+
+    /**
+     * Returns a List of T objects populated by the CSV file at the
+     * given URL.
+     * Object T must be the same as instanced with CSVReader
+     * @param url valid URL containing csv data
+     * @return List of T Objects or null
+     */
+    public List<T> readFromURL(String url) {
+        List<T> results = null;
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(new URL(url).openStream()))) {
+            results = readListFromCSV(br);
+        } catch (IOException ioe) {
+            logger.log(Level.SEVERE, "Unable to open URL.");
+            logger.log(Level.SEVERE, ioe.getMessage());
+        }
+        return results;
+    }
+
+    /**
+     * Reads CSV data from local file into Objects of type T,
+     * populating a HashMap
+     * using Field with index from annotation <tt>n</tt> as the
+     * key and the object as the value.
+     * If data for key field is not unique, only the last item will be saved.
+     * If that is the case use <tt>reatToMapOfLists</tt>
+     * @param filename local file
+     * @param index index given with @CSVField annotation
+     * @param <U> Data type of field for key.
+     * @return
+     */
+    public <U> Map<U, T> readToMap(String filename, int index) {
+        Map<U, T> map = null;
+        try (BufferedReader br = Files.newBufferedReader(new File(filename).toPath())) {
+            map = readMapFromCSV(br, index);
+        } catch (IOException ioe) {
+            logger.log(Level.SEVERE, "Unable to open file.");
+            logger.log(Level.SEVERE, ioe.getMessage());
+        }
+        return map;
+    }
+
+    public <U> Map<U, T> readToMapFromURL(String url, int index) {
+        Map<U, T> map = null;
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(new URL(url).openStream()))) {
+            map = readMapFromCSV(br, index);
+        } catch (IOException ioe) {
+            logger.log(Level.SEVERE, "Unable to open URL.");
+            logger.log(Level.SEVERE, ioe.getMessage());
+        }
+        return map;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <U> Map<U, T> readMapFromCSV(BufferedReader br, int index) throws IOException{
+        CSVInfo item = null;
+        for (CSVInfo each : csvClass.fields) {
+            if (each.index == index) {
+                item = each;
+                break;
+            }
+        }
+
+        if (item == null) {
+            logger.log(Level.SEVERE, "No item for supplied index.");
+            return null;
+        }
+
+        Map<U, T> map = new HashMap<>();
+        String input;
+
+        if (csvClass.pClass.isAnnotationPresent(CSVHeader.class)) {
+            CSVHeader header = csvClass.pClass.getAnnotation(CSVHeader.class);
+            if (header.has_header()) {
+                // ignore header line
+                br.readLine();
+            }
+        }
+        while ((input = br.readLine()) != null) {
+            try {
+                T t = getObjectFromCSV(input, csvClass, 0);
+                if (t != null) {
+                    U obj = (U) item.field.get(t);
+                    if (obj != null) {
+                        map.putIfAbsent(obj, t);
+                    }
+                }
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+
+        }
+        return map;
+    }
+
+    /**
+     *
+     * @param filename
+     * @param index
+     * @param <U>
+     * @return
+     */
+    public <U> Map<U, List<T>> readToMapOfLists(String filename, int index) {
+        Map<U, List<T>> map = null;
+        try (BufferedReader br = Files.newBufferedReader(new File(filename).toPath())) {
+            map = readMapOfListsFromCSV(br, index);
+        } catch (IOException ioe) {
+            logger.log(Level.SEVERE, "Unable to open file.");
+            logger.log(Level.SEVERE, ioe.getMessage());
+        }
+        return map;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <U> Map<U, List<T>> readMapOfListsFromCSV(BufferedReader br, int index) throws IOException{
+        CSVInfo item = null;
+        for (CSVInfo each : csvClass.fields) {
+            if (each.index == index) {
+                item = each;
+                break;
+            }
+        }
+
+        if (item == null) {
+            logger.log(Level.SEVERE, "No item for supplied index.");
+            return null;
+        }
+
+        Map<U, List<T>> map = new HashMap<>();
+        String input;
+
+        if (csvClass.pClass.isAnnotationPresent(CSVHeader.class)) {
+            CSVHeader header = csvClass.pClass.getAnnotation(CSVHeader.class);
+            if (header.has_header()) {
+                // ignore header line
+                br.readLine();
+            }
+        }
+        while ((input = br.readLine()) != null) {
+            try {
+                T t = getObjectFromCSV(input, csvClass, 0);
+                if (t != null) {
+                    U obj = (U) item.field.get(t);
+                    if (obj != null) {
+                        List<T> list = map.getOrDefault(obj, new ArrayList<>());
+                        list.add(t);
+                        map.putIfAbsent(obj, list);
+                    }
+                }
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+
+        }
+        return map;
     }
 
     private List<T> readListFromCSV(BufferedReader br) throws IOException{
